@@ -334,38 +334,34 @@ jobs:
           fi
           cd ..
 
-      - name: Apply Variant-Specific Patches
+      - name: Apply Additional Patches
         run: |
           cd kernel
-          PATCH_DIR="../.github/patches/${{ matrix.variant }}"
           
-          # Apply common patches first
+          # Apply common patches (non-SuSFS)
           if [ -d "../.github/patches/common" ]; then
-            echo "📋 Applying common patches..."
             for patch in ../.github/patches/common/*.patch; do
               if [ -f "$patch" ]; then
-                # Skip SuSFS patches (already applied in Setup SuSFS step)
-                if [[ "$(basename $patch)" == "50_add_susfs"* ]] || [[ "$(basename $patch)" == "10_enable_susfs"* ]]; then
-                  echo "  Skipping (already applied): $(basename $patch)"
-                  continue
-                fi
-                echo "  Applying: $(basename $patch)"
+                PATCH_NAME=$(basename "$patch")
+                # Skip SuSFS patches (already applied)
+                [[ "$PATCH_NAME" == "50_add_susfs"* ]] && continue
+                [[ "$PATCH_NAME" == "10_enable_susfs"* ]] && continue
+                echo "📋 Applying common patch: $PATCH_NAME"
                 patch -p1 --forward < "$patch" || true
               fi
             done
           fi
           
-          # Apply variant-specific patches
+          # Apply variant-specific patches (non-SuSFS)
+          PATCH_DIR="../.github/patches/${{ matrix.variant }}"
           if [ -d "$PATCH_DIR" ]; then
-            echo "📋 Applying ${{ matrix.variant }}-specific patches..."
             for patch in $PATCH_DIR/*.patch; do
               if [ -f "$patch" ]; then
-                # Skip SuSFS patches (already applied in Setup SuSFS step)
-                if [[ "$(basename $patch)" == "50_add_susfs"* ]] || [[ "$(basename $patch)" == "10_enable_susfs"* ]]; then
-                  echo "  Skipping (already applied): $(basename $patch)"
-                  continue
-                fi
-                echo "  Applying: $(basename $patch)"
+                PATCH_NAME=$(basename "$patch")
+                # Skip SuSFS patches (already applied)
+                [[ "$PATCH_NAME" == "50_add_susfs"* ]] && continue
+                [[ "$PATCH_NAME" == "10_enable_susfs"* ]] && continue
+                echo "📋 Applying ${{ matrix.variant }} patch: $PATCH_NAME"
                 patch -p1 --forward < "$patch" || true
               fi
             done
@@ -381,13 +377,7 @@ jobs:
             -o /tmp/fix-clidr.patch
           patch -p1 --forward < /tmp/fix-clidr.patch || true
           
-          # Proc base fix (for SuSFS)
-          if [ "${{ env.ENABLE_SUSFS }}" = "true" ]; then
-            echo "📋 Applying fix_proc_base.patch"
-            curl -LSs "https://raw.githubusercontent.com/infectedmushi/kernel_patches/main/fix_proc_base.patch" \
-              -o /tmp/fix_proc_base.patch
-            patch -p1 --forward < /tmp/fix_proc_base.patch || true
-          fi
+          # Note: fix_proc_base.patch is already integrated into the 50_add_susfs patch
 
       - name: Patch Scripts
         run: |
