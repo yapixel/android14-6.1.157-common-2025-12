@@ -608,43 +608,15 @@ jobs:
           echo "📈 CCACHE stats AFTER build:"
           ccache -s
           
-          # Get final hit rate - handle multiple ccache output formats
-          FINAL_STATS=$(ccache -s)
+          # Show detailed statistics (ignore if no matches)
+          echo "📊 Detailed cache statistics:"
+          ccache -s | grep -E "(Cacheable calls|Hits|Misses|Hit rate|cache size|files in cache)" || true
           
-          # Try different patterns for hit rate
-          FINAL_HIT_RATE=$(echo "$FINAL_STATS" | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" | head -1)
-          
-          # If not found, try calculating from hits/misses
-          if [ -z "$FINAL_HIT_RATE" ] || [ "$FINAL_HIT_RATE" = "0.0" ]; then
-            CACHE_HITS=$(echo "$FINAL_STATS" | grep -i "cache.*hit" | grep -Eo "[0-9]+" | head -1)
-            CACHE_MISSES=$(echo "$FINAL_STATS" | grep -i "cache.*miss" | grep -Eo "[0-9]+" | head -1)
-            
-            if [ -n "$CACHE_HITS" ] && [ -n "$CACHE_MISSES" ] && [ "$((CACHE_HITS + CACHE_MISSES))" -gt 0 ]; then
-              FINAL_HIT_RATE=$(awk "BEGIN {printf \"%.1f\", ($CACHE_HITS / ($CACHE_HITS + $CACHE_MISSES)) * 100}")
-            else
-              FINAL_HIT_RATE="0.0"
-            fi
-          fi
-          
-          echo "FINAL_HIT_RATE=${FINAL_HIT_RATE}%" >> $GITHUB_ENV
-          echo "💾 Final hit rate: ${FINAL_HIT_RATE}%"
-          
-          # Calculate improvement
-          INITIAL_RATE="${INITIAL_HIT_RATE%\%}"
-          FINAL_RATE="${FINAL_HIT_RATE}"
-          
-          if [ -n "$INITIAL_RATE" ] && [ "$INITIAL_RATE" != "0.0" ]; then
-            IMPROVEMENT=$(awk "BEGIN {printf \"%.1f\", $FINAL_RATE - $INITIAL_RATE}")
-            echo "📊 Hit rate change: ${IMPROVEMENT}% (${INITIAL_RATE}% → ${FINAL_RATE}%)"
-          fi
-          
-          # Show final cache size
-          CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} | cut -f1)
+          # Get cache size
+          CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} 2>/dev/null | cut -f1 || echo "Unknown")
           echo "📦 Final cache size: $CACHE_SIZE"
           
-          # Show detailed statistics
-          echo "📊 Detailed cache statistics:"
-          ccache -s | grep -E "(Cacheable calls|Hits|Misses|Hit rate|cache size|files in cache)"
+          echo "FINAL_HIT_RATE=N/A" >> $GITHUB_ENV
 
       - name: Package Kernel
         run: |
