@@ -1,27 +1,27 @@
-From b8f2dcdf33359eace65d552369c9e7acde229dee Mon Sep 17 00:00:00 2001
+From 57c2ff9dac91c76e1d5dd75a971ea738db7ee556 Mon Sep 17 00:00:00 2001
 From: deepongi <infectedmushi@gmail.com>
 Date: Thu, 27 Nov 2025 18:51:22 +0000
 Subject: [PATCH] 10_enable_susfs_for_ksu
 
 ---
- kernel/Kconfig           |  91 +++++++++++++++++++++++-
+ kernel/Kconfig           |  91 +++++++++++++++++++++-
  kernel/Makefile          |  10 ++-
- kernel/allowlist.c       |   4 ++
- kernel/apk_sign.c        |   4 ++
+ kernel/allowlist.c       |   4 +
+ kernel/apk_sign.c        |   4 +
  kernel/app_profile.c     |   6 ++
  kernel/kernel_umount.c   |   3 +
  kernel/ksu.c             |  15 ++++
- kernel/ksud.c            |  52 ++++++++++++++
+ kernel/ksud.c            |  52 +++++++++++++
  kernel/ksud.h            |  19 +++++
  kernel/manager.h         |  14 ++++
  kernel/selinux/rules.c   |   9 +++
- kernel/selinux/selinux.c |  93 ++++++++++++++++++++++++
+ kernel/selinux/selinux.c |  93 +++++++++++++++++++++++
  kernel/selinux/selinux.h |  13 ++++
- kernel/setuid_hook.c     | 119 +++++++++++++++++++++++++++++++
- kernel/sucompat.c        | 124 ++++++++++++++++++++++++++++++++
+ kernel/setuid_hook.c     | 119 +++++++++++++++++++++++++++++
+ kernel/sucompat.c        | 124 ++++++++++++++++++++++++++++++
  kernel/sucompat.h        |  10 ++-
- kernel/supercalls.c      | 150 +++++++++++++++++++++++++++++++++++++++
- 17 files changed, 731 insertions(+), 5 deletions(-)
+ kernel/supercalls.c      | 158 ++++++++++++++++++++++++++++++++++++++-
+ 17 files changed, 736 insertions(+), 8 deletions(-)
 
 diff --git a/kernel/Kconfig b/kernel/Kconfig
 index cc4dbb3a..393e16cd 100644
@@ -1011,7 +1011,7 @@ index 82161f7f..4f0d4f9d 100644
  #endif
 \ No newline at end of file
 diff --git a/kernel/supercalls.c b/kernel/supercalls.c
-index b5054509..397e3664 100644
+index b5054509..c2cc7454 100644
 --- a/kernel/supercalls.c
 +++ b/kernel/supercalls.c
 @@ -11,6 +11,10 @@
@@ -1118,19 +1118,37 @@ index b5054509..397e3664 100644
          break;
      }
      default: {
-@@ -707,6 +743,7 @@ static int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void
-     return 0;
+@@ -653,12 +689,13 @@ static void ksu_install_fd_tw_func(struct callback_head *cb)
+     kfree(tw);
  }
  
 +#ifndef CONFIG_KSU_SUSFS
- static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+ // downstream: make sure to pass arg as reference, this can allow us to extend things.
+ static int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg)
  {
-     struct pt_regs *real_regs = PT_REAL_REGS(regs);
-@@ -723,7 +760,114 @@ static struct kprobe reboot_kp = {
+ 
+     if (magic1 != KSU_INSTALL_MAGIC1)
+-    	return 0;
++        return 0;
+ 
+     pr_info("sys_reboot: intercepted call! magic: 0x%x id: %d\n", magic1, magic2);
+ 
+@@ -698,7 +735,7 @@ static int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void
+ 
+         if (cmd == ksu_get_manager_uid()) {
+             if (copy_to_user((void __user *)*arg, &reply, sizeof(reply)))
+-            	pr_info("sys_reboot: reply fail\n");
++                pr_info("sys_reboot: reply fail\n");
+         }
+ 
+         return 0;
+@@ -723,7 +760,116 @@ static struct kprobe reboot_kp = {
      .symbol_name = REBOOT_SYMBOL,
      .pre_handler = reboot_handler_pre,
  };
-+#else
++#endif // #ifndef CONFIG_KSU_SUSFS
++
++#ifdef CONFIG_KSU_SUSFS
 +int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg)
 +{
 +    if (magic1 != KSU_INSTALL_MAGIC1) {
@@ -1237,11 +1255,11 @@ index b5054509..397e3664 100644
 +    }
 +    return 0;
 +}
-+#endif // #ifndef CONFIG_KSU_SUSFS
++#endif // #ifdef CONFIG_KSU_SUSFS
  
  void ksu_supercalls_init(void)
  {
-@@ -734,16 +878,22 @@ void ksu_supercalls_init(void)
+@@ -734,16 +880,22 @@ void ksu_supercalls_init(void)
          pr_info("  %-18s = 0x%08x\n", ksu_ioctl_handlers[i].name, ksu_ioctl_handlers[i].cmd);
      }
  
@@ -1264,6 +1282,13 @@ index b5054509..397e3664 100644
  }
  
  // IOCTL dispatcher
+@@ -816,4 +968,4 @@ int ksu_install_fd(void)
+     pr_info("ksu fd installed: %d for pid %d\n", fd, current->pid);
+ 
+     return fd;
+-}
++}
+\ No newline at end of file
 -- 
 2.52.0
 
