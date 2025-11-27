@@ -237,6 +237,12 @@ jobs:
         run: |
           echo "🔧 Setting up LOCAL CCACHE (no GitHub Actions cache)..."
           
+          # Source local .zshrc to get ccache settings
+          if [ -f "$HOME/.zshrc" ]; then
+            echo "📋 Sourcing .zshrc for ccache configuration..."
+            source "$HOME/.zshrc" || true
+          fi
+          
           # Ensure ccache is in PATH
           export PATH="/usr/lib/ccache:$PATH"
           
@@ -248,6 +254,7 @@ jobs:
           fi
           
           # Configure ccache to use local directory only
+          # These will override .zshrc settings if needed, or use .zshrc defaults
           ccache --set-config=cache_dir=${{ env.CCACHE_DIR }}
           ccache --set-config=max_size=${{ env.CCACHE_MAXSIZE }}
           ccache --set-config=sloppiness=file_macro,locale,time_macros
@@ -558,6 +565,11 @@ jobs:
 
       - name: Build Kernel
         run: |
+          # Source local .zshrc for ccache settings
+          if [ -f "$HOME/.zshrc" ]; then
+            source "$HOME/.zshrc" || true
+          fi
+          
           cd kernel
           export ARCH=arm64
           export PATH="${{ env.CLANG_BIN }}:/usr/lib/ccache:$PATH"
