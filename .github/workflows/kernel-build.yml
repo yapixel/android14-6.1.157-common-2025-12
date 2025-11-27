@@ -6,7 +6,7 @@ on:
       ksu_variant:
         description: 'KernelSU variant to build'
         required: true
-        default: 'tiann'
+        default: 'all'
         type: choice
         options:
           - tiann
@@ -23,17 +23,6 @@ on:
         required: false
         default: false
         type: boolean
-  push:
-    branches:
-      - main
-      - ksu-tiann
-      - ksu-kowsu
-      - ksu-mksu
-  pull_request:
-    branches:
-      - main
-  schedule:
-    - cron: '0 0 * * 0'
 
 permissions:
   contents: write
@@ -60,25 +49,16 @@ jobs:
       - name: Set Build Matrix
         id: set-matrix
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VARIANT="${{ github.event.inputs.ksu_variant }}"
-          elif [ "${{ github.ref }}" = "refs/heads/ksu-tiann" ]; then
-            VARIANT="tiann"
-          elif [ "${{ github.ref }}" = "refs/heads/ksu-kowsu" ]; then
-            VARIANT="kowsu"
-          elif [ "${{ github.ref }}" = "refs/heads/ksu-mksu" ]; then
-            VARIANT="mksu"
-          else
-            # Default to tiann for main branch or PRs
-            VARIANT="tiann"
-          fi
+          # Only workflow_dispatch triggers this workflow now
+          VARIANT="${{ github.event.inputs.ksu_variant }}"
           
           if [ "$VARIANT" = "all" ]; then
             echo 'matrix={"variant":["tiann","kowsu","mksu"]}' >> $GITHUB_OUTPUT
+            echo "🎯 Building ALL variants: tiann, kowsu, mksu"
           else
             echo "matrix={\"variant\":[\"$VARIANT\"]}" >> $GITHUB_OUTPUT
+            echo "🎯 Building variant: $VARIANT"
           fi
-          echo "🎯 Building variant(s): $VARIANT"
 
       - name: Set Build Config
         id: config
@@ -628,43 +608,15 @@ jobs:
           echo "📈 CCACHE stats AFTER build:"
           ccache -s
           
-          # Get final hit rate - handle multiple ccache output formats
-          FINAL_STATS=$(ccache -s)
+          # Show detailed statistics (ignore if no matches)
+          echo "📊 Detailed cache statistics:"
+          ccache -s | grep -E "(Cacheable calls|Hits|Misses|Hit rate|cache size|files in cache)" || true
           
-          # Try different patterns for hit rate
-          FINAL_HIT_RATE=$(echo "$FINAL_STATS" | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" | head -1)
-          
-          # If not found, try calculating from hits/misses
-          if [ -z "$FINAL_HIT_RATE" ] || [ "$FINAL_HIT_RATE" = "0.0" ]; then
-            CACHE_HITS=$(echo "$FINAL_STATS" | grep -i "cache.*hit" | grep -Eo "[0-9]+" | head -1)
-            CACHE_MISSES=$(echo "$FINAL_STATS" | grep -i "cache.*miss" | grep -Eo "[0-9]+" | head -1)
-            
-            if [ -n "$CACHE_HITS" ] && [ -n "$CACHE_MISSES" ] && [ "$((CACHE_HITS + CACHE_MISSES))" -gt 0 ]; then
-              FINAL_HIT_RATE=$(awk "BEGIN {printf \"%.1f\", ($CACHE_HITS / ($CACHE_HITS + $CACHE_MISSES)) * 100}")
-            else
-              FINAL_HIT_RATE="0.0"
-            fi
-          fi
-          
-          echo "FINAL_HIT_RATE=${FINAL_HIT_RATE}%" >> $GITHUB_ENV
-          echo "💾 Final hit rate: ${FINAL_HIT_RATE}%"
-          
-          # Calculate improvement
-          INITIAL_RATE="${INITIAL_HIT_RATE%\%}"
-          FINAL_RATE="${FINAL_HIT_RATE}"
-          
-          if [ -n "$INITIAL_RATE" ] && [ "$INITIAL_RATE" != "0.0" ]; then
-            IMPROVEMENT=$(awk "BEGIN {printf \"%.1f\", $FINAL_RATE - $INITIAL_RATE}")
-            echo "📊 Hit rate change: ${IMPROVEMENT}% (${INITIAL_RATE}% → ${FINAL_RATE}%)"
-          fi
-          
-          # Show final cache size
-          CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} | cut -f1)
+          # Get cache size
+          CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} 2>/dev/null | cut -f1 || echo "Unknown")
           echo "📦 Final cache size: $CACHE_SIZE"
           
-          # Show detailed statistics
-          echo "📊 Detailed cache statistics:"
-          ccache -s | grep -E "(Cacheable calls|Hits|Misses|Hit rate|cache size|files in cache)"
+          echo "FINAL_HIT_RATE=N/A" >> $GITHUB_ENV
 
       - name: Package Kernel
         run: |
@@ -713,7 +665,7 @@ jobs:
           retention-days: 30
 
       - name: Create Release
-        if: success() && github.event_name != 'pull_request'
+        if: success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ matrix.variant }}-build-${{ github.run_number }}
