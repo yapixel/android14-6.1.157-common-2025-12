@@ -242,7 +242,7 @@ jobs:
             "kowsu")
               echo "📦 Setting up KOWX712/KernelSU (KowSU)..."
               KSU_REPO="KOWX712/KernelSU"
-              KSU_BRANCH="main"
+              KSU_BRANCH="master"
               ;;
             "mksu")
               echo "📦 Setting up 5ec1cff/KernelSU (MKSU)..."
