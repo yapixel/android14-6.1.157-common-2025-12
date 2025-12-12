@@ -1291,7 +1291,7 @@ jobs:
 
   create_release:
     needs: [setup, build]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-22.04
     if: needs.setup.outputs.create_release == 'true' && success()
     outputs:
       duration: ${{ env.BUILD_DURATION }}
@@ -1599,7 +1599,7 @@ jobs:
 
   notify:
     needs: [setup, create_release, build]
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-22.04
     if: always()
     steps:
       - name: Extract and Prepare Build Information
