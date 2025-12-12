@@ -1282,7 +1282,7 @@ jobs:
         with:
           name: kernel-${{ matrix.variant }}-${{ github.run_number }}
           path: |
-            ${{ env.KERNEL_ZIP }
+            ${{ env.KERNEL_ZIP }}
           retention-days: 30
 
   create_release:
