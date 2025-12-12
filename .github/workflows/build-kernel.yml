@@ -1282,11 +1282,7 @@ jobs:
         with:
           name: kernel-${{ matrix.variant }}-${{ github.run_number }}
           path: |
-            ${{ env.KERNEL_ZIP }}
-            ${{ env.KERNEL_ZIP }}.sha256
-            ${{ env.KERNEL_ZIP }}.md5
-            kernel/build.log
-            ${{ env.CHANGELOG_FILE }}
+            ${{ env.KERNEL_ZIP }
           retention-days: 30
 
   create_release:
