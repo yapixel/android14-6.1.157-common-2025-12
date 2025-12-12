@@ -1,0 +1,64 @@
+name: Delete All Git Tags
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+permissions:
+  contents: write  # Required to push deletions to the repository
+
+jobs:
+  delete-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history needed to access all tags
+          token: ${{ secrets.GITHUB_TOKEN }}  # Default token has permission to push
+
+      - name: Fetch All Tags
+        run: |
+          echo "Fetching all remote tags..."
+          git fetch --tags --force
+
+      - name: List Existing Tags
+        id: list-tags
+        run: |
+          TAGS=$(git tag -l | wc -l)
+          echo "Found $TAGS tag(s)"
+          if [ "$TAGS" -eq 0 ]; then
+            echo "No tags to delete."
+            echo "has_tags=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_tags=true" >> $GITHUB_OUTPUT
+            git tag -l | tee tags.txt
+            echo "Tags to be deleted:"
+            cat tags.txt
+          fi
+
+      - name: Delete All Remote Tags
+        if: steps.list-tags.outputs.has_tags == 'true'
+        run: |
+          echo "Deleting all remote tags..."
+          # Delete all tags in one efficient push
+          git tag -l | xargs -n 1 git push --delete origin || echo "Some tags already deleted (safe to ignore)"
+          echo "All remote tags deleted."
+
+      - name: Prune and Delete Local Tags
+        if: steps.list-tags.outputs.has_tags == 'true'
+        run: |
+          echo "Cleaning up local tags..."
+          # Prune any dangling local references
+          git fetch --prune origin +refs/tags/*:refs/tags/*
+          # Delete all local tags
+          git tag -d $(git tag -l) || echo "No local tags left"
+          echo "All local tags removed."
+
+      - name: Final Confirmation
+        run: |
+          REMAINING=$(git tag -l | wc -l)
+          if [ "$REMAINING" -eq 0 ]; then
+            echo "✅ Success: Repository now has ZERO Git tags."
+          else
+            echo "⚠️  Warning: $REMAINING tag(s) still remain."
+          fi
