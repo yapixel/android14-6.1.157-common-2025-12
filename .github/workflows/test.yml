@@ -1116,9 +1116,7 @@ jobs:
             --notes-file RELEASE_NOTES.md \
             --draft=false \
             --prerelease=false \
-            ./*.zip \
-            ./*.sha256 \
-            ./*.md5
+            ./*.zip 
           
           echo "✅ Release created successfully"
           echo "🔗 https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
