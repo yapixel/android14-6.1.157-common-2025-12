@@ -1002,32 +1002,53 @@ jobs:
           ### 📦 Available Variants
           EOF
           
-          # Add variant information
-          for variant in tiann kowsu mksu sukisu; do
-            VAR_UPPER=$(echo "$variant" | tr '[:lower:]' '[:upper:]')
-            ZIP_VAR="${variant}_zip"
-            SIZE_VAR="${variant}_size"
-            MD5_VAR="${variant}_md5"
-            SHA256_VAR="${variant}_sha256"
-            VERSION_VAR="${variant}_ksu_version"
-            
-            eval ZIP_NAME=\$\{needs.build.outputs.$ZIP_VAR\}
-            eval FILE_SIZE=\$\{needs.build.outputs.$SIZE_VAR\}
-            eval MD5=\$\{needs.build.outputs.$MD5_VAR\}
-            eval SHA256=\$\{needs.build.outputs.$SHA256_VAR\}
-            eval KSU_VER=\$\{needs.build.outputs.$VERSION_VAR\}
-            
-            if [ -n "$ZIP_NAME" ]; then
-              cat >> RELEASE_NOTES.md << VARIANT_EOF
+          # Add variant information - tiann
+          if [ -n "${{ needs.build.outputs.tiann_zip }}" ]; then
+            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
           
-          #### 🔹 $VAR_UPPER ($KSU_VER)
-          - **File:** \`$ZIP_NAME\`
-          - **Size:** $FILE_SIZE
-          - **MD5:** \`$MD5\`
-          - **SHA256:** \`$SHA256\`
+          #### 🔹 TIANN (${{ needs.build.outputs.tiann_ksu_version }})
+          - **File:** `${{ needs.build.outputs.tiann_zip }}`
+          - **Size:** ${{ needs.build.outputs.tiann_size }}
+          - **MD5:** `${{ needs.build.outputs.tiann_md5 }}`
+          - **SHA256:** `${{ needs.build.outputs.tiann_sha256 }}`
           VARIANT_EOF
-            fi
-          done
+          fi
+          
+          # Add variant information - kowsu
+          if [ -n "${{ needs.build.outputs.kowsu_zip }}" ]; then
+            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
+          
+          #### 🔹 KOWSU (${{ needs.build.outputs.kowsu_ksu_version }})
+          - **File:** `${{ needs.build.outputs.kowsu_zip }}`
+          - **Size:** ${{ needs.build.outputs.kowsu_size }}
+          - **MD5:** `${{ needs.build.outputs.kowsu_md5 }}`
+          - **SHA256:** `${{ needs.build.outputs.kowsu_sha256 }}`
+          VARIANT_EOF
+          fi
+          
+          # Add variant information - mksu
+          if [ -n "${{ needs.build.outputs.mksu_zip }}" ]; then
+            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
+          
+          #### 🔹 MKSU (${{ needs.build.outputs.mksu_ksu_version }})
+          - **File:** `${{ needs.build.outputs.mksu_zip }}`
+          - **Size:** ${{ needs.build.outputs.mksu_size }}
+          - **MD5:** `${{ needs.build.outputs.mksu_md5 }}`
+          - **SHA256:** `${{ needs.build.outputs.mksu_sha256 }}`
+          VARIANT_EOF
+          fi
+          
+          # Add variant information - sukisu
+          if [ -n "${{ needs.build.outputs.sukisu_zip }}" ]; then
+            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
+          
+          #### 🔹 SUKISU (${{ needs.build.outputs.sukisu_ksu_version }})
+          - **File:** `${{ needs.build.outputs.sukisu_zip }}`
+          - **Size:** ${{ needs.build.outputs.sukisu_size }}
+          - **MD5:** `${{ needs.build.outputs.sukisu_md5 }}`
+          - **SHA256:** `${{ needs.build.outputs.sukisu_sha256 }}`
+          VARIANT_EOF
+          fi
           
           # Add installation instructions
           cat >> RELEASE_NOTES.md << 'EOF'
