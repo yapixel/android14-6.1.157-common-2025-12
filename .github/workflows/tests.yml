@@ -684,16 +684,11 @@ jobs:
           echo "CHANGELOG_FILE=$CHANGELOG_FILE" >> $GITHUB_ENV
           
           echo "✅ Comprehensive changelog generated successfully!"
-
+      
       - name: Setup SuSFS
-        if: env.ENABLE_SUSFS == 'true' || matrix.variant == 'sukisu'
+        if: env.ENABLE_SUSFS == 'true'
         run: |
           echo "📦 Setting up SuSFS..."
-          
-          # SukiSU ALWAYS requires SuSFS (pre-integrated in main branch)
-          if [ "${{ matrix.variant }}" = "sukisu" ]; then
-            echo "🔒 SukiSU-Ultra: SuSFS is mandatory (pre-integrated)"
-          fi
           
           # Copy SuSFS files
           cp susfs4ksu/kernel_patches/fs/susfs.c kernel/fs/
@@ -897,9 +892,16 @@ jobs:
               echo 'CONFIG_KSU_LSM_SECURITY_HOOKS=y' >> out/.config
               ;;
             "sukisu")
-              # SukiSU-Ultra (main branch) - minimal config
+              # SukiSU-Ultra (main branch) - config based on SuSFS status
               echo 'CONFIG_LOCALVERSION="-deepongi+"' >> out/.config
-              echo 'CONFIG_KSU_SUSFS_SUS_KSTAT_USE_INLINE_HOOK=y' >> out/.config
+              
+              if [ "${{ env.ENABLE_SUSFS }}" = "true" ]; then
+                # With SuSFS: Use inline hook for sus_kstat
+                echo 'CONFIG_KSU_SUSFS_SUS_KSTAT_USE_INLINE_HOOK=y' >> out/.config
+              else
+                # Without SuSFS: Use syscall tracepoints
+                echo 'CONFIG_HAVE_SYSCALL_TRACEPOINTS=y' >> out/.config
+              fi
               ;;
           esac
           
@@ -919,12 +921,6 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           EOF
             
-            # SukiSU-specific: Enable inline hook for sus_kstat
-            if [ "${{ matrix.variant }}" = "sukisu" ]; then
-              echo 'CONFIG_HAVE_SYSCALL_TRACEPOINTS=y' >> out/.config
-            fi
-          fi
-          
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out olddefconfig
 
       - name: Handle ABI File Changes
