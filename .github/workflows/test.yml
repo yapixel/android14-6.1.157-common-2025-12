@@ -155,36 +155,6 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Free Up Additional Space
-        run: |
-          echo "📊 Disk space BEFORE cleanup:"
-          df -h /
-          
-          # Remove unnecessary packages
-          sudo apt-get remove -y \
-            '^aspnetcore-.*' '^dotnet-.*' 'php.*' \
-            '^mongodb-.*' '^mysql-.*' \
-            azure-cli google-chrome-stable firefox \
-            powershell mono-devel 2>/dev/null || true
-          
-          sudo apt-get autoremove -y
-          sudo apt-get clean
-          
-          # Remove large directories
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /usr/local/share/boost \
-            /usr/lib/jvm \
-            /usr/local/graalvm \
-            /usr/local/.ghcup \
-            /usr/local/share/powershell \
-            /usr/share/swift 2>/dev/null || true
-          
-          echo "📊 Disk space AFTER cleanup:"
-          df -h /
-
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -192,13 +162,13 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          echo "📦 Cloning kernel source (android14-6.1-2025-09)..."
+          echo "📦 Cloning official Google kernel source (android14-6.1-2025-09)..."
           git clone \
             --depth=1 \
             --branch android14-6.1-2025-09 \
             --single-branch \
-            https://github.com/aosp-mirror/kernel_common.git kernel
-          echo "✅ Kernel source cloned successfully"
+            https://android.googlesource.com/kernel/common kernel
+          echo "✅ Official Google Kernel source cloned successfully"
 
       - name: Clone SuSFS4KSU
         run: |
@@ -227,706 +197,139 @@ jobs:
         run: |
           CLANG_DIR="$HOME/clang"
           CLANG_URL="https://github.com/ZyCromerZ/Clang/releases/download/22.0.0git-20250928-release/Clang-22.0.0git-20250928.tar.gz"
-          
-          echo "📥 Downloading Clang 22..."
           mkdir -p "$CLANG_DIR"
           curl -fsSL "$CLANG_URL" | tar -xz -C "$CLANG_DIR"
-          
           echo "CLANG_PATH=$CLANG_DIR/bin" >> $GITHUB_ENV
           echo "$CLANG_DIR/bin" >> $GITHUB_PATH
-          
-          echo "✅ Clang 22 installed:"
-          "$CLANG_DIR/bin/clang" --version | head -1
 
-      - name: Setup ARM64 Toolchain (GNU 14.3.rel1)
+      - name: Setup ARM64 Toolchain
         run: |
           TC_DIR="$HOME/toolchains"
           TC_URL="https://developer.arm.com/-/media/Files/downloads/gnu/14.3.rel1/binrel/arm-gnu-toolchain-14.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
-          
-          echo "📥 Downloading ARM64 toolchain..."
           mkdir -p "$TC_DIR"
           curl -fsSL "$TC_URL" | tar -xJ -C "$TC_DIR"
-          
           TC_PREFIX=$(find "$TC_DIR" -maxdepth 1 -name "arm-gnu-toolchain-*aarch64*" -type d | head -1)
           echo "ARM64_TOOLCHAIN=$TC_PREFIX/bin/aarch64-none-linux-gnu-" >> $GITHUB_ENV
-          echo "✅ ARM64 toolchain installed"
 
-      - name: Setup ARM32 Toolchain (GNU 14.3.rel1)
+      - name: Setup ARM32 Toolchain
         run: |
           TC_DIR="$HOME/toolchains"
           TC_URL="https://developer.arm.com/-/media/Files/downloads/gnu/14.3.rel1/binrel/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi.tar.xz"
-          
-          echo "📥 Downloading ARM32 toolchain..."
           curl -fsSL "$TC_URL" | tar -xJ -C "$TC_DIR"
-          
           TC_PREFIX=$(find "$TC_DIR" -maxdepth 1 -name "arm-gnu-toolchain-*arm-none-eabi*" -type d | head -1)
           echo "ARM32_TOOLCHAIN=$TC_PREFIX/bin/arm-none-eabi-" >> $GITHUB_ENV
-          echo "✅ ARM32 toolchain installed"
 
       - name: Setup CCache
         run: |
-          CCACHE_DIR="$HOME/.ccache"
-          mkdir -p "$CCACHE_DIR"
-          
-          echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
-          
+          mkdir -p "$HOME/.ccache"
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
           ccache -M 5G
           ccache -z
-          ccache --show-config
-          
-          echo "✅ CCache configured (max 5GB)"
-
-      - name: Verify Disk Space
-        run: |
-          echo "📊 Disk space before build:"
-          df -h /
-          echo ""
-          echo "📊 Home directory size:"
-          du -sh "$HOME"/* 2>/dev/null | sort -hr | head -10 || true
-
-      - name: Store Repository Commit Info
-        run: |
-          COMMIT_INFO=$(git log -1 --format="%H %h %cd %s" --date=format:'%Y-%m-%d %H:%M:%S')
-          read -r HASH SHORT DATE MSG <<< "$COMMIT_INFO"
-          
-          echo "WORKFLOW_COMMIT=$HASH" >> $GITHUB_ENV
-          echo "WORKFLOW_COMMIT_SHORT=$SHORT" >> $GITHUB_ENV
-          echo "WORKFLOW_COMMIT_DATE=$DATE" >> $GITHUB_ENV
-          echo "WORKFLOW_COMMIT_MSG=$MSG" >> $GITHUB_ENV
-          
-          echo "🔖 Workflow: $SHORT - $MSG"
-
-      - name: Verify and Store Kernel Info
-        run: |
-          cd kernel
-          
-          # Verify Makefile exists
-          if [ ! -f "Makefile" ]; then
-            echo "❌ Kernel Makefile not found!"
-            exit 1
-          fi
-          
-          # Extract version
-          VERSION=$(grep "^VERSION" Makefile | awk '{print $3}')
-          PATCHLEVEL=$(grep "^PATCHLEVEL" Makefile | awk '{print $3}')
-          echo "✅ Kernel version: $VERSION.$PATCHLEVEL"
-          
-          # Store commit info
-          COMMIT_INFO=$(git log -1 --format="%H %h %cd %s" --date=format:'%Y-%m-%d %H:%M:%S')
-          read -r HASH SHORT DATE MSG <<< "$COMMIT_INFO"
-          
-          echo "KERNEL_COMMIT=$HASH" >> $GITHUB_ENV
-          echo "KERNEL_COMMIT_SHORT=$SHORT" >> $GITHUB_ENV
-          echo "KERNEL_COMMIT_DATE=$DATE" >> $GITHUB_ENV
-          echo "KERNEL_COMMIT_MSG=$MSG" >> $GITHUB_ENV
-          
-          echo "🔖 Kernel: $SHORT - $MSG"
-
-      - name: Verify and Store SuSFS Info
-        run: |
-          cd susfs4ksu
-          
-          if [ ! -d "kernel_patches" ]; then
-            echo "❌ SuSFS kernel_patches directory not found!"
-            exit 1
-          fi
-          echo "✅ SuSFS verified"
-          
-          COMMIT_INFO=$(git log -1 --format="%H %h %cd %s" --date=format:'%Y-%m-%d %H:%M:%S')
-          read -r HASH SHORT DATE MSG <<< "$COMMIT_INFO"
-          
-          echo "SUSFS_COMMIT=$HASH" >> $GITHUB_ENV
-          echo "SUSFS_COMMIT_SHORT=$SHORT" >> $GITHUB_ENV
-          echo "SUSFS_COMMIT_DATE=$DATE" >> $GITHUB_ENV
-          echo "SUSFS_COMMIT_MSG=$MSG" >> $GITHUB_ENV
-          
-          echo "🔖 SuSFS: $SHORT - $MSG"
-
-      - name: Show Build Environment
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📋 BUILD ENVIRONMENT - ${{ matrix.variant }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🔧 Clang: $(clang --version | head -1)"
-          echo "🔧 ARM64: ${{ env.ARM64_TOOLCHAIN }}"
-          echo "🔧 ARM32: ${{ env.ARM32_TOOLCHAIN }}"
-          echo "💾 CCache: ${{ env.CCACHE_DIR }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-      - name: Clean Kernel Directory
-        run: |
-          echo "🧹 Cleaning kernel directory..."
-          cd kernel
-          rm -rf KernelSU drivers/kernelsu
-          git reset --hard HEAD
-          git clean -fdx
-          echo "✅ Kernel directory cleaned"
 
       - name: Setup KernelSU Variant
         run: |
           cd kernel
-          
-          # Define variant-specific configuration
           case "${{ matrix.variant }}" in
-            "tiann")
-              KSU_REPO="tiann/KernelSU"
-              KSU_BRANCH="main"
-              USE_SETUP_SH="true"
-              echo "📦 Setting up Official KernelSU (tiann)"
-              ;;
-            "kowsu")
-              KSU_REPO="KOWX712/KernelSU"
-              KSU_BRANCH="master"
-              USE_SETUP_SH="true"
-              echo "📦 Setting up KowSU (KOWX712)"
-              ;;
-            "mksu")
-              KSU_REPO="5ec1cff/KernelSU"
-              KSU_BRANCH="main"
-              USE_SETUP_SH="true"
-              echo "📦 Setting up MKSU (5ec1cff)"
-              ;;
-            "sukisu")
-              KSU_REPO="SukiSU-Ultra/SukiSU-Ultra"
-              KSU_BRANCH="tmp-builtin"
-              USE_SETUP_SH="false"
-              echo "📦 Setting up SukiSU-Ultra"
-              ;;
-            *)
-              echo "❌ Unknown variant: ${{ matrix.variant }}"
-              exit 1
-              ;;
+            "tiann")   KSU_REPO="tiann/KernelSU"; KSU_BRANCH="main"; USE_SETUP_SH="true" ;;
+            "kowsu")   KSU_REPO="KOWX712/KernelSU"; KSU_BRANCH="master"; USE_SETUP_SH="true" ;;
+            "mksu")    KSU_REPO="5ec1cff/KernelSU"; KSU_BRANCH="main"; USE_SETUP_SH="true" ;;
+            "sukisu")  KSU_REPO="SukiSU-Ultra/SukiSU-Ultra"; KSU_BRANCH="tmp-builtin"; USE_SETUP_SH="false" ;;
           esac
-          
-          # Clone KernelSU
-          echo "📥 Cloning $KSU_REPO (branch: $KSU_BRANCH)..."
-          git clone \
-            --depth=1 \
-            --branch="$KSU_BRANCH" \
-            --single-branch \
-            "https://github.com/$KSU_REPO.git" KernelSU
-          
-          # Setup based on variant
+          git clone --depth=1 --branch="$KSU_BRANCH" "https://github.com/$KSU_REPO.git" KernelSU
           if [ "$USE_SETUP_SH" = "true" ]; then
-            if [ -f "KernelSU/kernel/setup.sh" ]; then
-              echo "🚀 Running setup.sh..."
-              chmod +x KernelSU/kernel/setup.sh
-              ./KernelSU/kernel/setup.sh .
-            else
-              echo "❌ setup.sh not found at KernelSU/kernel/setup.sh"
-              exit 1
-            fi
+            chmod +x KernelSU/kernel/setup.sh && ./KernelSU/kernel/setup.sh .
           else
-            # Manual setup for SukiSU-Ultra
-            echo "🔧 Manual setup for SukiSU-Ultra..."
-            
-            # Try symlink first
             ln -sf "$(pwd)/KernelSU/kernel" drivers/kernelsu
-            
-            # Verify or fallback to copy
-            if [ ! -f "drivers/kernelsu/Kconfig" ]; then
-              rm -rf drivers/kernelsu
-              cp -r KernelSU/kernel drivers/kernelsu
-            fi
-            
-            # Update Makefile
-            if ! grep -q "kernelsu" drivers/Makefile; then
-              echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-            fi
-            
-            # Update Kconfig
-            if ! grep -q "kernelsu" drivers/Kconfig; then
-              sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-            fi
+            grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            grep -q "kernelsu" drivers/Kconfig || sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           fi
-          
-          # Export variables
           echo "KSU_REPO=$KSU_REPO" >> $GITHUB_ENV
-          echo "KSU_BRANCH=$KSU_BRANCH" >> $GITHUB_ENV
-          
-          echo "✅ KernelSU setup completed for ${{ matrix.variant }}"
-
-      - name: Verify KernelSU Setup
-        run: |
-          if [ ! -d "kernel/drivers/kernelsu" ]; then
-            echo "❌ KernelSU drivers directory not found"
-            exit 1
-          fi
-          
-          if [ ! -f "kernel/drivers/kernelsu/Kconfig" ]; then
-            echo "❌ KernelSU Kconfig not found"
-            exit 1
-          fi
-          
-          echo "✅ KernelSU setup verified"
 
       - name: Get KSU Version Info
         run: |
           cd kernel/KernelSU
-          
-          echo "📊 Fetching full git history..."
-          git fetch --unshallow --quiet 2>/dev/null || \
-            git fetch --depth=10000 --quiet 2>/dev/null || true
-          
-          echo "🔢 Calculating KSU version..."
+          KSU_COUNT=$(git rev-list --count HEAD)
           if [ "${{ matrix.variant }}" = "sukisu" ]; then
-            git fetch origin main:main --quiet 2>/dev/null || true
-            KSU_COUNT=$(git rev-list --count main)
             KSU_VERSION=$((40000 + KSU_COUNT - 2815))
-            echo "✅ SukiSU version: r$KSU_VERSION (base: 40000)"
           else
-            KSU_COUNT=$(git rev-list --count HEAD)
             KSU_VERSION=$((KSU_COUNT + 30000))
-            echo "✅ KernelSU version: r$KSU_VERSION (base: 30000)"
           fi
-          
           echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
-          echo "KSU_COUNT=$KSU_COUNT" >> $GITHUB_ENV
-
-      - name: Store KernelSU Commit Info
-        run: |
-          cd kernel/KernelSU
-          
-          COMMIT_INFO=$(git log -1 --format="%H %h %cd %s %an" --date=format:'%Y-%m-%d %H:%M:%S')
-          read -r HASH SHORT DATE MSG AUTHOR <<< "$COMMIT_INFO"
-          
-          echo "KSU_COMMIT=$HASH" >> $GITHUB_ENV
-          echo "KSU_COMMIT_SHORT=$SHORT" >> $GITHUB_ENV
-          echo "KSU_COMMIT_DATE=$DATE" >> $GITHUB_ENV
-          echo "KSU_COMMIT_MSG=$MSG" >> $GITHUB_ENV
-          echo "KSU_COMMIT_AUTHOR=$AUTHOR" >> $GITHUB_ENV
-          
-          echo "🔖 KernelSU: $SHORT - $MSG (by $AUTHOR)"
 
       - name: Setup SuSFS
         if: env.ENABLE_SUSFS == 'true' || matrix.variant == 'sukisu'
         run: |
-          echo "📦 Setting up SuSFS..."
-          
-          if [ "${{ matrix.variant }}" = "sukisu" ]; then
-            echo "🔒 SukiSU-Ultra: SuSFS is mandatory (pre-integrated)"
-          fi
-          
-          # Copy SuSFS files
           cp susfs4ksu/kernel_patches/fs/susfs.c kernel/fs/
           cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel/include/linux/
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h kernel/include/linux/
-          
           cd kernel
-          
-          # Apply kernel SuSFS patch
-          VARIANT_PATCH="../.github/patches/${{ matrix.variant }}/50_add_susfs_in_gki-android14-6.1.patch"
-          DEFAULT_PATCH="../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
-          
-          if [ -f "$VARIANT_PATCH" ]; then
-            echo "📋 Applying variant-specific SuSFS patch"
-            patch -p1 --forward < "$VARIANT_PATCH" || true
-          else
-            echo "📋 Applying default SuSFS patch"
-            patch -p1 --forward < "$DEFAULT_PATCH" || true
-          fi
-          
-          # Apply KSU SuSFS patch (not for sukisu)
+          patch -p1 --forward < "../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" || true
           if [ "${{ matrix.variant }}" != "sukisu" ]; then
             cd KernelSU
-            VARIANT_KSU_PATCH="../../.github/patches/${{ matrix.variant }}/10_enable_susfs_for_ksu.patch"
-            DEFAULT_KSU_PATCH="../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-            
-            if [ -f "$VARIANT_KSU_PATCH" ]; then
-              echo "📋 Applying variant-specific KSU SuSFS patch"
-              patch -p1 --forward < "$VARIANT_KSU_PATCH" || true
-            else
-              echo "📋 Applying default KSU SuSFS patch"
-              patch -p1 --forward < "$DEFAULT_KSU_PATCH" || true
-            fi
-            cd ..
+            patch -p1 --forward < "../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
           fi
-          
-          echo "✅ SuSFS setup completed"
 
-      - name: Apply Additional Patches
+      - name: Configure and Build Kernel
         run: |
           cd kernel
-          
-          # Apply LKM spoof patch (not for sukisu)
-          if [ "${{ matrix.variant }}" != "sukisu" ]; then
-            cd KernelSU
-            LKM_PATCH="../../.github/patches/${{ matrix.variant }}/20-KernelSU-Spoof-LKM-mode-to-suppress-manager-warning.patch"
-            if [ -f "$LKM_PATCH" ]; then
-              echo "📋 Applying LKM spoof patch"
-              patch -p1 --forward < "$LKM_PATCH" || true
-            fi
-            cd ..
-          fi
-          
-          # Apply remote patches
-          echo "📋 Applying fix-clidr-uninitialized.patch"
-          curl -fsSL "https://raw.githubusercontent.com/infectedmushi/kernel_patches/main/fix-clidr-uninitialized.patch" | \
-            patch -p1 --forward || true
-          
-          # Patch setlocalversion script
-          sed -i '/# Check for uncommitted changes\./,/fi/d' scripts/setlocalversion
-          
-          echo "✅ All patches applied"
-
-      - name: Configure Kernel
-        run: |
-          cd kernel
-          
           export ARCH=arm64
           export PATH="${{ env.CLANG_PATH }}:/usr/lib/ccache:$PATH"
           export CROSS_COMPILE="${{ env.ARM64_TOOLCHAIN }}"
           export CROSS_COMPILE_COMPAT="${{ env.ARM32_TOOLCHAIN }}"
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          export CC="ccache clang"
           
-          # Generate base config
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out gki_defconfig
-          
-          # Apply variant-specific configuration
           cat >> out/.config << 'EOF'
-          # CPU & Architecture - Tensor G3
-          CONFIG_ARM64_CORTEX_X3=y
-          CONFIG_ARM64_CORTEX_A715=y
-          CONFIG_ARM64_CORTEX_A510=y
-          CONFIG_ARM64_VA_BITS=48
-          CONFIG_ARM64_PA_BITS=48
-          CONFIG_ARM64_TAGGED_ADDR_ABI=y
-          CONFIG_ARM64_SVE=y
-          CONFIG_ARM64_BTI=y
-          CONFIG_ARM64_PTR_AUTH=y
-          CONFIG_ARM64_SME=y
-
-          # Scheduler & Performance
-          CONFIG_SCHED_MC=y
-          CONFIG_SCHED_CORE=y
-          CONFIG_ENERGY_MODEL=y
-          CONFIG_UCLAMP_TASK=y
-          CONFIG_UCLAMP_TASK_GROUP=y
-
-          # CPU Frequency & Power
-          CONFIG_CPU_FREQ=y
-          CONFIG_CPUFREQ_DT=y
-          CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
-          CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
-          CONFIG_OPP=y
-          CONFIG_CPU_IDLE=y
-          CONFIG_ARM_PSCI_CPUIDLE=y
-
-          # Thermal Management
-          CONFIG_THERMAL=y
-          CONFIG_CPU_THERMAL=y
-          CONFIG_DEVFREQ_THERMAL=y
-          CONFIG_THERMAL_GOV_POWER_ALLOCATOR=y
-          CONFIG_THERMAL_GOV_STEP_WISE=y
-          CONFIG_THERMAL_GOV_FAIR_SHARE=y
-          CONFIG_THERMAL_EMULATION=y
-          CONFIG_THERMAL_WRITABLE_TRIPS=y
-
-          # Power & Performance
-          CONFIG_POWER_CAP=y
-          CONFIG_PERF_EVENTS=y
-          CONFIG_NUMA_BALANCING=y
-          CONFIG_CMA=y
-          CONFIG_CMA_AREAS=7
-
-          # Kernel Version
-          CONFIG_LOCALVERSION_AUTO=n
-
-          # Kprobes (required for KernelSU)
-          CONFIG_KPROBES=y
-          CONFIG_HAVE_KPROBES=y
-          CONFIG_KPROBE_EVENTS=y
-
-          # Filesystem
-          CONFIG_TMPFS_XATTR=y
-          CONFIG_TMPFS_POSIX_ACL=y
-
-          # Network
-          CONFIG_IP_NF_TARGET_TTL=y
-          CONFIG_IP6_NF_TARGET_HL=y
-          CONFIG_IP6_NF_MATCH_HL=y
-
-          # TCP Congestion Control
-          CONFIG_TCP_CONG_ADVANCED=y
-          CONFIG_TCP_CONG_BBR=y
-          CONFIG_NET_SCH_FQ=y
-
-          # Compilation Optimization
-          CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y
-          CONFIG_LTO=y
-          CONFIG_LTO_CLANG=y
-          CONFIG_LTO_CLANG_THIN=y
-
-          # IP Sets
-          CONFIG_IP_SET=y
-          CONFIG_IP_SET_MAX=256
-          CONFIG_IP_SET_BITMAP_IP=y
-          CONFIG_IP_SET_BITMAP_IPMAC=y
-          CONFIG_IP_SET_BITMAP_PORT=y
-          CONFIG_IP_SET_HASH_IP=y
-          CONFIG_IP_SET_HASH_IPPORT=y
-          CONFIG_IP_SET_HASH_IPPORTIP=y
-          CONFIG_IP_SET_HASH_IPPORTNET=y
-          CONFIG_IP_SET_HASH_NET=y
-          CONFIG_IP_SET_HASH_NETNET=y
-          CONFIG_IP_SET_HASH_NETPORT=y
-          CONFIG_IP_SET_HASH_NETIFACE=y
-
-          # CAKE Queue Discipline
-          CONFIG_NET_SCH_CAKE=y
-
-          # KernelSU Base Config
           CONFIG_KSU=y
-          CONFIG_KSU_DEBUG=n
-          EOF
-          
-          # Variant-specific config
-          case "${{ matrix.variant }}" in
-            "tiann"|"kowsu"|"mksu")
-              cat >> out/.config << 'EOF'
-          CONFIG_LOCALVERSION="-deepongi+"
-          CONFIG_KSU_KPROBES_HOOK=n
-          CONFIG_KSU_ALLOWLIST_WORKAROUND=n
-          CONFIG_KSU_LSM_SECURITY_HOOKS=y
-          EOF
-              ;;
-            "sukisu")
-              cat >> out/.config << 'EOF'
-          CONFIG_LOCALVERSION="-deepongi+"
-          CONFIG_KSU_SUSFS_SUS_KSTAT_USE_INLINE_HOOK=y
-          EOF
-              ;;
-          esac
-          
-          # SuSFS configuration
-          if [ "${{ env.ENABLE_SUSFS }}" = "true" ] || [ "${{ matrix.variant }}" = "sukisu" ]; then
-            cat >> out/.config << 'EOF'
           CONFIG_KSU_SUSFS=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
+          CONFIG_LOCALVERSION="-deepongi+"
           EOF
-          fi
-          
-          # Regenerate config
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out olddefconfig
           
-          echo "✅ Kernel configured"
-
-      - name: Prepare for Build
-        run: |
-          cd kernel
-          
-          echo "🧹 Removing ABI protected exports..."
-          rm -f android/abi_gki_protected_exports_* 2>/dev/null || true
-          
-          if [ "${{ env.FORCE_CLEAN }}" = "true" ]; then
-            echo "🧹 Performing clean..."
-            make -j$(nproc) LLVM=1 LLVM_IAS=1 LD=ld.lld O=out clean
-          fi
-          
-          echo "✅ Ready to build"
-
-      - name: Build Kernel
-        run: |
-          cd kernel
-          
-          export ARCH=arm64
-          export PATH="${{ env.CLANG_PATH }}:/usr/lib/ccache:$PATH"
-          export CROSS_COMPILE="${{ env.ARM64_TOOLCHAIN }}"
-          export CROSS_COMPILE_COMPAT="${{ env.ARM32_TOOLCHAIN }}"
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          
-          # CCache optimization
-          export CCACHE_COMPRESS=true
-          export CCACHE_COMPRESSLEVEL=6
-          export CCACHE_MAXSIZE=5G
-          export CCACHE_SLOPPINESS="include_file_ctime,include_file_mtime,time_macros"
-          
-          export CC="ccache clang"
-          export CXX="ccache clang++"
-          
-          # Calculate optimal job count
-          CORES=$(nproc)
-          MEMORY_GB=$(free -g | awk '/^Mem:/{print $2}')
-          MAX_JOBS=$(( (MEMORY_GB - 2) / 2 ))
-          
-          if [ $MAX_JOBS -lt $CORES ]; then
-            MAKE_JOBS=$MAX_JOBS
-            echo "⚠️ Limited by RAM: Using $MAKE_JOBS jobs ($CORES cores, ${MEMORY_GB}GB RAM)"
-          else
-            MAKE_JOBS=$CORES
-            echo "✅ Using $MAKE_JOBS jobs ($CORES cores, ${MEMORY_GB}GB RAM)"
-          fi
-          
-          [ $MAKE_JOBS -lt 1 ] && MAKE_JOBS=1
-          
-          # Build
           START_TIME=$SECONDS
-          echo "🔨 Building kernel for ${{ matrix.variant }}..."
-          
-          make -j$MAKE_JOBS \
-            ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            LD=ld.lld \
-            HOSTLD=ld.lld \
-            O=out \
-            CC="$CC" \
-            2>&1 | tee build.log
-          
-          BUILD_TIME=$((SECONDS - START_TIME))
-          BUILD_MINS=$((BUILD_TIME / 60))
-          BUILD_SECS=$((BUILD_TIME % 60))
-          
-          echo "BUILD_TIME=${BUILD_MINS}m ${BUILD_SECS}s" >> $GITHUB_ENV
-          echo "MAKE_JOBS=$MAKE_JOBS" >> $GITHUB_ENV
-          
-          echo "✅ Build completed in ${BUILD_MINS}m ${BUILD_SECS}s"
-
-      - name: Record Build Duration
-        id: build-duration
-        run: |
-          echo "duration=${{ env.BUILD_TIME }}" >> $GITHUB_OUTPUT
-
-      - name: Check CCache Performance
-        run: |
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          echo "📈 CCache statistics:"
-          ccache -s
-          
-          CCACHE_OUTPUT=$(ccache -s 2>&1)
-          
-          # Extract metrics
-          HIT_RATE=$(echo "$CCACHE_OUTPUT" | grep -oP 'Hits:.*?\K\d+\.\d+%' | head -1)
-          CACHE_HITS=$(echo "$CCACHE_OUTPUT" | grep "Hits:" | awk '{print $2}' | head -1)
-          CACHE_MISSES=$(echo "$CCACHE_OUTPUT" | grep "Misses:" | awk '{print $2}' | head -1)
-          CACHE_SIZE=$(echo "$CCACHE_OUTPUT" | grep "Cache size" | awk '{print $4}' | head -1)
-          
-          echo "CCACHE_HIT_RATE=${HIT_RATE:-N/A}" >> $GITHUB_ENV
-          echo "CCACHE_HITS=${CACHE_HITS:-0}" >> $GITHUB_ENV
-          echo "CCACHE_MISSES=${CACHE_MISSES:-0}" >> $GITHUB_ENV
-          echo "FINAL_CACHE_SIZE=${CACHE_SIZE:-N/A}" >> $GITHUB_ENV
-
-      - name: Export Build Information
-        id: export-build-info
-        run: |
-          echo "ccache_hit_rate=${{ env.CCACHE_HIT_RATE }}" >> $GITHUB_OUTPUT
-          echo "ccache_hits=${{ env.CCACHE_HITS }}" >> $GITHUB_OUTPUT
-          echo "ccache_misses=${{ env.CCACHE_MISSES }}" >> $GITHUB_OUTPUT
-          echo "ccache_size=${{ env.FINAL_CACHE_SIZE }}" >> $GITHUB_OUTPUT
-          echo "commit_hash=${{ env.WORKFLOW_COMMIT_SHORT }}" >> $GITHUB_OUTPUT
-          echo "commit_message=${{ env.WORKFLOW_COMMIT_MSG }}" >> $GITHUB_OUTPUT
-
-      - name: Verify Build Output
-        run: |
-          if [ ! -f "kernel/out/arch/arm64/boot/Image" ]; then
-            echo "❌ Kernel Image not found!"
-            exit 1
-          fi
-          
-          IMAGE_SIZE=$(du -h kernel/out/arch/arm64/boot/Image | cut -f1)
-          echo "✅ Kernel Image built successfully ($IMAGE_SIZE)"
+          make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out CC="$CC"
+          echo "BUILD_TIME=$((SECONDS - START_TIME))s" >> $GITHUB_ENV
 
       - name: Package Kernel
         run: |
           cd kernel
-          
-          # Extract kernel version
           KERNEL_VERSION=$(make -s kernelversion)
           cd ..
-          
-          echo "✅ Kernel version: $KERNEL_VERSION"
-          
-          # Determine AnyKernel3 configuration
           case "${{ matrix.variant }}" in
-            "tiann")   AK3_BRANCH="KernelSU"; AK3_REPO="deepongi-labs/AnyKernel3-p8a" ;;
-            "kowsu")   AK3_BRANCH="KowSU";    AK3_REPO="deepongi-labs/AnyKernel3-p8a" ;;
-            "mksu")    AK3_BRANCH="MKSU";     AK3_REPO="deepongi-labs/AnyKernel3-p8a" ;;
-            "sukisu")  AK3_BRANCH="sukisu";   AK3_REPO="deepongi-labs/AnyKernel3-p8a" ;;
+            "tiann")   AK3_BRANCH="KernelSU" ;;
+            "kowsu")   AK3_BRANCH="KowSU" ;;
+            "mksu")    AK3_BRANCH="MKSU" ;;
+            "sukisu")  AK3_BRANCH="sukisu" ;;
           esac
-          
-          # Clone AnyKernel3
-          echo "📥 Cloning AnyKernel3 ($AK3_BRANCH)..."
-          git clone \
-            --depth=1 \
-            --branch="$AK3_BRANCH" \
-            --single-branch \
-            "https://github.com/$AK3_REPO" AnyKernel3
-          
-          cd AnyKernel3
-          rm -rf .git .github
-          
-          # Copy kernel files
-          cp ../kernel/out/arch/arm64/boot/Image ./
-          [ -f ../kernel/out/arch/arm64/boot/dtbo.img ] && cp ../kernel/out/arch/arm64/boot/dtbo.img ./
-          [ -f ../kernel/out/arch/arm64/boot/dtb ] && cp ../kernel/out/arch/arm64/boot/dtb ./
-          
-          # Generate filename
-          TIMESTAMP=$(date +%Y%m%d-%H%M)
-          VARIANT_UPPER=$(echo "${{ matrix.variant }}" | tr '[:lower:]' '[:upper:]')
-          SUSFS_SUFFIX=${{ (env.ENABLE_SUSFS == 'true' || matrix.variant == 'sukisu') && 'SUSFS' || 'NOSUSFS' }}
-          
-          ZIP_NAME="AK3-${KERNEL_VERSION}-${VARIANT_UPPER}-${TIMESTAMP}-r${{ env.KSU_VERSION }}-${SUSFS_SUFFIX}.zip"
-          
-          # Create zip
-          echo "📦 Creating package: $ZIP_NAME"
-          zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" ".github/*"
-          cd ..
-          
-          # Generate checksums
-          sha256sum "$ZIP_NAME" > "${ZIP_NAME}.sha256"
-          md5sum "$ZIP_NAME" > "${ZIP_NAME}.md5"
-          
-          FILE_SIZE=$(du -h "$ZIP_NAME" | cut -f1)
-          echo "✅ Package created: $ZIP_NAME ($FILE_SIZE)"
-          
+          git clone --depth=1 --branch="$AK3_BRANCH" "https://github.com/deepongi-labs/AnyKernel3-p8a" AnyKernel3
+          cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+          ZIP_NAME="AK3-${KERNEL_VERSION}-${{ matrix.variant }}-${{ env.KSU_VERSION }}.zip"
+          cd AnyKernel3 && zip -r9 "../$ZIP_NAME" . && cd ..
           echo "KERNEL_ZIP=$ZIP_NAME" >> $GITHUB_ENV
           echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
 
       - name: Generate File Info for Release
         id: generate-file-info
         run: |
-          FILE_SIZE=$(du -h "${{ env.KERNEL_ZIP }}" | cut -f1)
-          MD5_HASH=$(md5sum "${{ env.KERNEL_ZIP }}" | awk '{print $1}')
-          SHA256_HASH=$(sha256sum "${{ env.KERNEL_ZIP }}" | awk '{print $1}')
-          
-          echo "FILE_SIZE=${FILE_SIZE}" >> $GITHUB_OUTPUT
-          echo "MD5_HASH=${MD5_HASH}" >> $GITHUB_OUTPUT
-          echo "SHA256_HASH=${SHA256_HASH}" >> $GITHUB_OUTPUT
-          echo "VARIANT=${{ matrix.variant }}" >> $GITHUB_OUTPUT
+          echo "FILE_SIZE=$(du -h ${{ env.KERNEL_ZIP }} | cut -f1)" >> $GITHUB_OUTPUT
+          echo "MD5_HASH=$(md5sum ${{ env.KERNEL_ZIP }} | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "SHA256_HASH=$(sha256sum ${{ env.KERNEL_ZIP }} | awk '{print $1}')" >> $GITHUB_OUTPUT
           echo "ZIP_NAME=${{ env.KERNEL_ZIP }}" >> $GITHUB_OUTPUT
           echo "KSU_VERSION=r${{ env.KSU_VERSION }}" >> $GITHUB_OUTPUT
           echo "KERNEL_VERSION=${{ env.KERNEL_VERSION }}" >> $GITHUB_OUTPUT
 
-      - name: Build Summary
+      - name: Export Build Information
+        id: export-build-info
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📊 BUILD SUMMARY - ${{ matrix.variant }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "⏱️  Build time:      ${{ env.BUILD_TIME }}"
-          echo "🔧 Parallel jobs:   ${{ env.MAKE_JOBS }}"
-          echo "💾 CCache hit rate: ${{ env.CCACHE_HIT_RATE }}"
-          echo "📦 Package:         ${{ env.KERNEL_ZIP }}"
-          echo "📏 Size:            ${{ steps.generate-file-info.outputs.FILE_SIZE }}"
-          echo "🔐 MD5:             ${{ steps.generate-file-info.outputs.MD5_HASH }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "ccache_hit_rate=$(ccache -s | grep 'Hits:' | awk '{print $4}' | head -1)" >> $GITHUB_OUTPUT
+          echo "ccache_size=$(ccache -s | grep 'Cache size' | awk '{print $4}' | head -1)" >> $GITHUB_OUTPUT
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ matrix.variant }}-${{ github.run_number }}
-          path: |
-            ${{ env.KERNEL_ZIP }}
-            ${{ env.KERNEL_ZIP }}.sha256
-            ${{ env.KERNEL_ZIP }}.md5
-          retention-days: 30
-          compression-level: 0
+          path: ${{ env.KERNEL_ZIP }}*
 
   create_release:
     needs: [setup, build]
@@ -934,199 +337,55 @@ jobs:
     if: needs.setup.outputs.create_release == 'true' && success()
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Calculate Build Duration
-        run: |
-          START_TIME="${{ needs.setup.outputs.build_start_time }}"
-          END_TIME=$(date +%s)
-          
-          if [ -n "$START_TIME" ] && [ "$START_TIME" != "null" ] && [ "$START_TIME" -gt 0 ]; then
-            DURATION=$((END_TIME - START_TIME))
-            DURATION_MINS=$((DURATION / 60))
-            DURATION_SECS=$((DURATION % 60))
-            BUILD_DURATION="${DURATION_MINS}m ${DURATION_SECS}s"
-          else
-            BUILD_DURATION="Unknown"
-          fi
-          
-          echo "BUILD_DURATION=$BUILD_DURATION" >> $GITHUB_ENV
-
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
 
-      - name: Organize Release Assets
-        run: |
-          cd release-assets
-          
-          # Flatten directory structure
-          find . -type f -exec mv {} . \; 2>/dev/null || true
-          find . -type d -empty -delete
-          
-          echo "📦 Release assets:"
-          ls -lh
-
       - name: Generate Release Notes
         run: |
           cd release-assets
-          
-          # Extract build info
-          CCACHE_INFO="${{ needs.build.outputs.ccache_hit_rate }}"
-          if [ -n "${{ needs.build.outputs.ccache_hits }}" ]; then
-            CCACHE_INFO="$CCACHE_INFO (${{ needs.build.outputs.ccache_hits }} hits, ${{ needs.build.outputs.ccache_misses }} misses)"
-          fi
-          
-          # Create release notes
           cat > RELEASE_NOTES.md << EOF
-          ## 🚀 Android 16 Kernel Build #${{ github.run_number }}
+          ## 🚀 Google Kernel Build #${{ github.run_number }}
           
           **Build Date:** ${{ needs.setup.outputs.workflow_timestamp }}  
-          **Build Duration:** ${{ env.BUILD_DURATION }}  
-          **CCache Performance:** ${CCACHE_INFO}  
-          **Cache Size:** ${{ needs.build.outputs.ccache_size }} GB  
-          **Kernel Version:** 6.1.x  
-          **SuSFS:** ${{ github.event.inputs.disable_susfs == 'true' && '❌ Disabled' || '✅ Enabled' }}  
-          **Workflow Commit:** \`${{ needs.build.outputs.workflow_commit_hash }}\` - "${{ needs.build.outputs.workflow_commit_message }}"
+          **CCache Performance:** ${{ needs.build.outputs.ccache_hit_rate }}  
+          **Source:** [Official Google Kernel Source](https://android.googlesource.com/kernel/common)
           
           ---
-          
-          ### 📱 Supported Devices
-          - Google Pixel 8
-          - Google Pixel 8a
-          - Google Pixel 8 Pro
           
           ### 📦 Available Variants
           EOF
           
-          # Add variant information - tiann
-          if [ -n "${{ needs.build.outputs.tiann_zip }}" ]; then
-            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
+          # Simplified variant block logic
+          for v in tiann kowsu mksu sukisu; do
+            ZIP_VAR="${v}_zip"; VERSION_VAR="${v}_ksu_version"
+            if [ -n "${{!ZIP_VAR}}" ]; then
+              echo "#### 🔹 ${v^^} (${{!VERSION_VAR}})" >> RELEASE_NOTES.md
+              echo "- **File:** \`${{!ZIP_VAR}}\`" >> RELEASE_NOTES.md
+            fi
+          done
           
-          #### 🔹 TIANN (${{ needs.build.outputs.tiann_ksu_version }})
-          - **File:** `${{ needs.build.outputs.tiann_zip }}`
-          - **Size:** ${{ needs.build.outputs.tiann_size }}
-          - **MD5:** `${{ needs.build.outputs.tiann_md5 }}`
-          - **SHA256:** `${{ needs.build.outputs.tiann_sha256 }}`
-          VARIANT_EOF
-          fi
-          
-          # Add variant information - kowsu
-          if [ -n "${{ needs.build.outputs.kowsu_zip }}" ]; then
-            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
-          
-          #### 🔹 KOWSU (${{ needs.build.outputs.kowsu_ksu_version }})
-          - **File:** `${{ needs.build.outputs.kowsu_zip }}`
-          - **Size:** ${{ needs.build.outputs.kowsu_size }}
-          - **MD5:** `${{ needs.build.outputs.kowsu_md5 }}`
-          - **SHA256:** `${{ needs.build.outputs.kowsu_sha256 }}`
-          VARIANT_EOF
-          fi
-          
-          # Add variant information - mksu
-          if [ -n "${{ needs.build.outputs.mksu_zip }}" ]; then
-            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
-          
-          #### 🔹 MKSU (${{ needs.build.outputs.mksu_ksu_version }})
-          - **File:** `${{ needs.build.outputs.mksu_zip }}`
-          - **Size:** ${{ needs.build.outputs.mksu_size }}
-          - **MD5:** `${{ needs.build.outputs.mksu_md5 }}`
-          - **SHA256:** `${{ needs.build.outputs.mksu_sha256 }}`
-          VARIANT_EOF
-          fi
-          
-          # Add variant information - sukisu
-          if [ -n "${{ needs.build.outputs.sukisu_zip }}" ]; then
-            cat >> RELEASE_NOTES.md << 'VARIANT_EOF'
-          
-          #### 🔹 SUKISU (${{ needs.build.outputs.sukisu_ksu_version }})
-          - **File:** `${{ needs.build.outputs.sukisu_zip }}`
-          - **Size:** ${{ needs.build.outputs.sukisu_size }}
-          - **MD5:** `${{ needs.build.outputs.sukisu_md5 }}`
-          - **SHA256:** `${{ needs.build.outputs.sukisu_sha256 }}`
-          VARIANT_EOF
-          fi
-          
-          # Add installation instructions
           cat >> RELEASE_NOTES.md << 'EOF'
           
           ---
-          
-          ### 🚀 Installation
-          
-          #### Method 1: Kernel Flasher (Recommended)
-          1. Download [Kernel Flasher v1.6.0](https://github.com/fatalcoder524/KernelFlasher/releases/tag/v1.6.0)
-          2. Flash the AK3 zip file directly through the app
-          
-          #### Method 2: Manual Flash (Advanced)
-          ```bash
-          # Extract kernel image
-          unzip AK3-*.zip Image
-          
-          # Unpack boot image
-          magiskboot unpack boot.img
-          
-          # Replace kernel
-          mv -v Image kernel
-          
-          # Repack boot image
-          magiskboot repack boot.img
-          
-          # Flash to device
-          fastboot flash boot new-boot.img
-          ```
-          
-          ---
-          
           ### 📚 Resources
-          - **Repository:** https://github.com/${{ github.repository }}
+          - **Kernel Source:** [Google Android Kernel Common](https://android.googlesource.com/kernel/common)
           - **Actions Run:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          - **Report Issues:** https://github.com/${{ github.repository }}/issues
-          - **Telegram:** [@deepongi_labs](https://t.me/deepongi_labs)
-          
-          ---
-          
-          ### ⚠️ Important Notes
-          - Always backup your data before flashing
-          - Verify checksums before installation
-          - Compatible with Android 14+ on supported Pixel devices
-          
-          *Built with ❤️ using GitHub Actions*
           EOF
-          
-          echo "✅ Release notes generated"
 
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd release-assets
-          
           RELEASE_TAG="build-${{ github.run_number }}"
-          RELEASE_TITLE="Android 16 Kernel Build #${{ github.run_number }}"
-          
-          echo "📤 Creating release: $RELEASE_TAG"
+          # Updated Title
+          RELEASE_TITLE="Google Kernel Build #${{ github.run_number }}"
           
           gh release create "$RELEASE_TAG" \
             --repo "${{ github.repository }}" \
             --title "$RELEASE_TITLE" \
             --notes-file RELEASE_NOTES.md \
-            --draft=false \
-            --prerelease=false \
-            ./*.zip 
-          
-          echo "✅ Release created successfully"
-          echo "🔗 https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG"
-
-      - name: Release Summary
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🎉 RELEASE SUMMARY"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📦 Build: #${{ github.run_number }}"
-          echo "⏱️  Duration: ${{ env.BUILD_DURATION }}"
-          echo "🔗 URL: https://github.com/${{ github.repository }}/releases/tag/build-${{ github.run_number }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ./*.zip
