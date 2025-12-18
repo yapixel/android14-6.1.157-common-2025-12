@@ -144,9 +144,11 @@ jobs:
       - name: Maximize Build Space
         uses: easimon/maximize-build-space@master
         with:
-          build-mount-path: '/home/runner'
-          root-reserve-mb: 2048
-          swap-size-mb: 1024
+          # Define a specific mount path to avoid permission issues with /_temp
+          build-mount-path: '/home/runner/work' 
+          root-reserve-mb: 4096 # Increase reserve slightly for system stability
+          temp-reserve-mb: 100
+          swap-size-mb: 2048   # Increased swap for kernel compilation
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
