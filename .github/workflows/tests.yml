@@ -921,7 +921,7 @@ jobs:
             
             # SukiSU-specific: Enable inline hook for sus_kstat
             if [ "${{ matrix.variant }}" = "sukisu" ]; then
-              echo 'CONFIG_KSU_SUSFS_SUS_KSTAT_USE_INLINE_HOOK=y' >> out/.config
+              echo 'CONFIG_HAVE_SYSCALL_TRACEPOINTS=y' >> out/.config
             fi
           fi
           
