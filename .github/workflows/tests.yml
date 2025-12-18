@@ -1,4 +1,4 @@
-name: Tests v4.4.1 (by deepongi@deepongi-labs)
+name: Build GKI Kernel with KernelSU Variants v4.2.3 (by deepongi@deepongi-labs)
 
 on:
   workflow_dispatch:
@@ -1016,7 +1016,11 @@ jobs:
               # SukiSU-Ultra with Scope-Minimized Manual Hooks v1.6
               echo 'CONFIG_LOCALVERSION="-deepongi+"' >> out/.config
               
-              # Enable manual hooks (requires scope_min_manual_hooks_v1_6.patch)
+              # Manual hooks configuration:
+              # The patch wraps code in: #if defined(CONFIG_KSU) && defined(CONFIG_KSU_MANUAL_HOOK)
+              # We try to add CONFIG_KSU_MANUAL_HOOK to .config
+              # If it doesn't exist in Kconfig, olddefconfig will remove it
+              # In that case, we'll define it via CFLAGS during build
               echo 'CONFIG_KSU_MANUAL_HOOK=y' >> out/.config
               
               # SuSFS-specific configuration
@@ -1048,6 +1052,22 @@ jobs:
           fi
           
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out olddefconfig
+          
+          # Verify sukisu manual hooks configuration
+          if [ "${{ matrix.variant }}" = "sukisu" ]; then
+            echo ""
+            echo "🔍 Verifying sukisu manual hooks configuration..."
+            
+            if grep -q "^CONFIG_KSU_MANUAL_HOOK=y" out/.config; then
+              echo "✅ CONFIG_KSU_MANUAL_HOOK=y found in .config (defined in Kconfig)"
+              echo "MANUAL_HOOK_METHOD=kconfig" >> $GITHUB_ENV
+            else
+              echo "⚠️  CONFIG_KSU_MANUAL_HOOK removed by olddefconfig (not in Kconfig)"
+              echo "ℹ️  Will define CONFIG_KSU_MANUAL_HOOK via CFLAGS during build"
+              echo "MANUAL_HOOK_METHOD=cflags" >> $GITHUB_ENV
+            fi
+            echo ""
+          fi
 
       - name: Handle ABI File Changes
         run: |
@@ -1116,8 +1136,17 @@ jobs:
           echo "  - MAKE_JOBS: $MAKE_JOBS (auto-detected)"
           echo "  - CCache: Optimized (compress=true, maxsize=50G)"
           
+          # For sukisu: Add CONFIG_KSU_MANUAL_HOOK via CFLAGS if not in Kconfig
+          EXTRA_CFLAGS=""
+          if [ "${{ matrix.variant }}" = "sukisu" ] && [ "${{ env.MANUAL_HOOK_METHOD }}" = "cflags" ]; then
+            EXTRA_CFLAGS="KCFLAGS=-DCONFIG_KSU_MANUAL_HOOK"
+            echo "  - Manual Hooks: Enabled via CFLAGS (CONFIG not in Kconfig)"
+          elif [ "${{ matrix.variant }}" = "sukisu" ] && [ "${{ env.MANUAL_HOOK_METHOD }}" = "kconfig" ]; then
+            echo "  - Manual Hooks: Enabled via Kconfig"
+          fi
+          
           # Build with full LLVM toolchain for LTO support
-          make -j$MAKE_JOBS LLVM=1 LLVM_IAS=1 LD=ld.lld HOSTLD=ld.lld O=out CC="$CC" 2>&1 | tee build.log
+          make -j$MAKE_JOBS LLVM=1 LLVM_IAS=1 LD=ld.lld HOSTLD=ld.lld O=out CC="$CC" $EXTRA_CFLAGS 2>&1 | tee build.log
           
           BUILD_TIME=$((SECONDS - START_TIME))
           BUILD_MINS=$((BUILD_TIME / 60))
