@@ -244,7 +244,7 @@ jobs:
           
           if [ -d "devices/google" ]; then
             echo "✅ devices/google directory present"
-            ls -1 devices/google/ | head -10
+            ls -1 devices/google/ | head -20
           fi
           
           cd ..
