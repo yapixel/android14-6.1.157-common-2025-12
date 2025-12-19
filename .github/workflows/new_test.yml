@@ -1,0 +1,327 @@
+name: Build GKI Kernel 6.1.145 with Google Drivers New
+
+on:
+  workflow_dispatch:
+    inputs:
+      ksu_variant:
+        description: 'KernelSU variant to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - tiann
+          - kowsu
+          - mksu
+          - sukisu
+      disable_susfs:
+        description: 'Disable SuSFS features'
+        required: false
+        default: false
+        type: boolean
+      force_clean_build:
+        description: 'Force clean build (ignore cache)'
+        required: false
+        default: false
+        type: boolean
+      create_release:
+        description: 'Create GitHub Release with artifacts'
+        required: false
+        default: true
+        type: boolean
+      debug:
+        description: 'Enable debug output'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-22.04
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      enable_susfs: ${{ steps.config.outputs.enable_susfs }}
+      force_clean: ${{ steps.config.outputs.force_clean }}
+      build_start_time: ${{ steps.timestamp.outputs.start_time }}
+      create_release: ${{ steps.config.outputs.create_release }}
+      workflow_timestamp: ${{ steps.timestamp.outputs.workflow_timestamp }}
+    
+    steps:
+      - name: Record Build Start Time
+        id: timestamp
+        run: |
+          START_TIME=$(date +%s)
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          echo "start_time=$START_TIME" >> $GITHUB_OUTPUT
+          echo "workflow_timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "🕐 Build started at: $TIMESTAMP"
+      
+      - name: Set Build Matrix
+        id: set-matrix
+        run: |
+          VARIANT="${{ github.event.inputs.ksu_variant }}"
+          if [ "$VARIANT" = "all" ]; then
+            echo 'matrix={"variant":["tiann","kowsu","mksu","sukisu"]}' >> $GITHUB_OUTPUT
+          else
+            echo "matrix={\"variant\":[\"$VARIANT\"]}" >> $GITHUB_OUTPUT
+          fi
+          echo "🎯 Building variant(s): $VARIANT"
+      
+      - name: Set Build Config
+        id: config
+        run: |
+          ENABLE_SUSFS=${{ github.event.inputs.disable_susfs == 'false' }}
+          FORCE_CLEAN=${{ github.event.inputs.force_clean_build == 'true' }}
+          CREATE_RELEASE=${{ github.event.inputs.create_release == 'true' }}
+          echo "enable_susfs=$ENABLE_SUSFS" >> $GITHUB_OUTPUT
+          echo "force_clean=$FORCE_CLEAN" >> $GITHUB_OUTPUT
+          echo "create_release=$CREATE_RELEASE" >> $GITHUB_OUTPUT
+          
+          echo "⚙️ Configuration:"
+          echo "  - SuSFS: $ENABLE_SUSFS"
+          echo "  - Force Clean: $FORCE_CLEAN"
+          echo "  - Create Release: $CREATE_RELEASE"
+
+  build:
+    needs: setup
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    
+    env:
+      ENABLE_SUSFS: ${{ needs.setup.outputs.enable_susfs }}
+      FORCE_CLEAN: ${{ needs.setup.outputs.force_clean }}
+      KSU_VARIANT: ${{ matrix.variant }}
+    
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          build-mount-path: '/mnt/build_area'
+          root-reserve-mb: 2048
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Prepare Mount Permissions
+        run: |
+          sudo chown -R runner:docker /mnt/build_area
+          mkdir -p /mnt/build_area/clang /mnt/build_area/toolchains /mnt/build_area/.ccache
+          ln -s /mnt/build_area/clang $HOME/clang
+          ln -s /mnt/build_area/toolchains $HOME/toolchains
+          ln -s /mnt/build_area/.ccache $HOME/.ccache
+
+      - name: Free Up Additional Space
+        run: |
+          echo "📊 Disk space BEFORE cleanup:"
+          df -h /
+          sudo apt-get remove -y '^aspnetcore-.*' '^dotnet-.*' 'php.*' '^mongodb-.*' '^mysql-.*' azure-cli google-chrome-stable firefox powershell mono-devel 2>/dev/null || true
+          sudo apt-get autoremove -y && sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /usr/lib/jvm /usr/local/graalvm /usr/local/.ghcup /usr/local/share/powershell /usr/share/swift 2>/dev/null || true
+          echo "📊 Disk space AFTER cleanup:"
+          df -h /
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone Kernel Source
+        run: |
+          echo "📦 Cloning official Google kernel source (android14-6.1-2025-09)..."
+          git clone --depth=1 --branch android14-6.1-2025-09 --single-branch https://android.googlesource.com/kernel/common kernel
+          echo "✅ Official Google Kernel source cloned successfully"
+
+      - name: Clone Google Tensor Drivers
+        run: |
+          echo "📦 Cloning Google Tensor drivers..."
+          git clone --depth=1 --branch google_common --single-branch https://github.com/yapixel/google_common_kernel_drivers_simple.git google_drivers
+          echo "✅ Google Tensor drivers cloned successfully"
+
+      - name: Integrate Google Drivers into Kernel Tree
+        run: |
+          echo "🔧 Integrating Google Tensor drivers into kernel tree..."
+          mkdir -p kernel/google-modules
+          cp -r google_drivers/google-modules/* kernel/google-modules/
+          
+          if [ -d "google_drivers/devices/google" ]; then
+            echo "📁 Copying devices/google..."
+            mkdir -p kernel/devices
+            cp -r google_drivers/devices/google kernel/devices/
+          fi
+
+      - name: Fetch and Integrate Zuma Sultan Logic
+        run: |
+          echo "📥 Fetching Sultan's Zuma build logic..."
+          wget https://raw.githubusercontent.com/yapixel/android_kernel_google_zuma/refs/heads/16.0.0-sultan/google-modules/Makefile -O kernel/google-modules/Makefile
+          wget https://raw.githubusercontent.com/yapixel/android_kernel_google_zuma/refs/heads/16.0.0-sultan/google-modules/Kconfig -O kernel/google-modules/Kconfig
+          
+          cd kernel
+          if ! grep -q "obj-y += google-modules/" Makefile; then
+            echo "obj-y += google-modules/" >> Makefile
+          fi
+          if ! grep -q 'source "google-modules/Kconfig"' Kconfig; then
+            sed -i '$i source "google-modules/Kconfig"' Kconfig
+          fi
+          echo "✅ Zuma drivers integrated with remote config files."
+
+      - name: Clone SuSFS4KSU
+        run: |
+          echo "📦 Cloning SuSFS4KSU (gki-android14-6.1-dev)..."
+          git clone --depth=1 --branch gki-android14-6.1-dev --single-branch https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          echo "✅ SuSFS4KSU cloned successfully"
+
+      - name: Setup Build Environment
+        run: |
+          echo "📦 Installing build dependencies..."
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libssl-dev libxml2 libxml2-utils lzop rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 libarchive-tools pahole device-tree-compiler python3-dev
+          echo "✅ Build environment ready"
+
+      - name: Setup Clang 22
+        run: |
+          CLANG_DIR="$HOME/clang"
+          echo "📥 Downloading Clang 22..."
+          curl -fsSL "https://github.com/ZyCromerZ/Clang/releases/download/22.0.0git-20250928-release/Clang-22.0.0git-20250928.tar.gz" | tar -xz -C "$CLANG_DIR"
+          echo "CLANG_PATH=$CLANG_DIR/bin" >> $GITHUB_ENV
+          echo "$CLANG_DIR/bin" >> $GITHUB_PATH
+          echo "✅ Clang 22 installed:"
+          "$CLANG_DIR/bin/clang" --version | head -1
+
+      - name: Setup ARM Toolchains
+        run: |
+          echo "📥 Downloading ARM64 toolchain..."
+          curl -fsSL "https://developer.arm.com/-/media/Files/downloads/gnu/14.3.rel1/binrel/arm-gnu-toolchain-14.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz" | tar -xJ -C $HOME/toolchains
+          echo "ARM64_TOOLCHAIN=$(find $HOME/toolchains -name "bin" -type d | grep aarch64)/aarch64-none-linux-gnu-" >> $GITHUB_ENV
+          
+          echo "📥 Downloading ARM32 toolchain..."
+          curl -fsSL "https://developer.arm.com/-/media/Files/downloads/gnu/14.3.rel1/binrel/arm-gnu-toolchain-14.3.rel1-x86_64-arm-none-eabi.tar.xz" | tar -xJ -C $HOME/toolchains
+          echo "ARM32_TOOLCHAIN=$(find $HOME/toolchains -name "bin" -type d | grep arm-none-eabi)/arm-none-eabi-" >> $GITHUB_ENV
+          echo "✅ Toolchains installed"
+
+      - name: Setup CCache
+        run: |
+          CCACHE_DIR="$HOME/.ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> $GITHUB_ENV
+          ccache -M 10G && ccache -z
+          echo "✅ CCache configured (max 10GB)"
+
+      - name: Setup KernelSU Variant
+        run: |
+          cd kernel
+          case "${{ matrix.variant }}" in
+            "tiann") REPO="tiann/KernelSU"; BRANCH="main"; SETUP="true"; echo "📦 Setting up Official KernelSU (tiann)" ;;
+            "kowsu") REPO="KOWX712/KernelSU"; BRANCH="master"; SETUP="true"; echo "📦 Setting up KowSU (KOWX712)" ;;
+            "mksu")  REPO="5ec1cff/KernelSU"; BRANCH="main"; SETUP="true"; echo "📦 Setting up MKSU (5ec1cff)" ;;
+            "sukisu") REPO="SukiSU-Ultra/SukiSU-Ultra"; BRANCH="tmp-builtin"; SETUP="false"; echo "📦 Setting up SukiSU-Ultra" ;;
+          esac
+          git clone --depth=1 --branch="$BRANCH" "https://github.com/$REPO.git" KernelSU
+          if [ "$SETUP" = "true" ]; then
+            chmod +x KernelSU/kernel/setup.sh && ./KernelSU/kernel/setup.sh .
+          else
+            cp -r KernelSU/kernel drivers/kernelsu
+            grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+            grep -q "kernelsu" drivers/Kconfig || sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          fi
+          echo "✅ KernelSU setup completed for ${{ matrix.variant }}"
+
+      - name: Setup SuSFS
+        if: env.ENABLE_SUSFS == 'true' || matrix.variant == 'sukisu'
+        run: |
+          echo "📦 Setting up SuSFS..."
+          cp susfs4ksu/kernel_patches/fs/susfs.c kernel/fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h kernel/include/linux/
+          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h kernel/include/linux/
+          cd kernel
+          echo "📋 Applying SuSFS patch"
+          patch -p1 --forward < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch || true
+          if [ "${{ matrix.variant }}" != "sukisu" ]; then
+            cd KernelSU
+            echo "📋 Applying KSU SuSFS patch"
+            patch -p1 --forward < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          fi
+          echo "✅ SuSFS setup completed"
+
+      - name: Apply Additional Patches
+        run: |
+          echo "📋 Applying additional patches..."
+          cd kernel
+          curl -fsSL "https://raw.githubusercontent.com/infectedmushi/kernel_patches/main/fix-clidr-uninitialized.patch" | patch -p1 --forward || true
+          sed -i '/# Check for uncommitted changes\./,/fi/d' scripts/setlocalversion
+          echo "✅ All patches applied"
+
+      - name: Configure Kernel
+        run: |
+          cd kernel
+          export ARCH=arm64
+          export PATH="${{ env.CLANG_PATH }}:$PATH"
+          export CROSS_COMPILE="${{ env.ARM64_TOOLCHAIN }}"
+          
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out gki_defconfig
+          
+          # Massive config block including all required Google/Zuma drivers
+          cat >> out/.config << 'EOF'
+          CONFIG_LOCALVERSION="-deepongi+"
+          CONFIG_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_GOOGLE_MODULES=y
+          CONFIG_SOC_ZUMA=y
+          CONFIG_BOARD_ZUMA=y
+          CONFIG_GOOGLE_BMS=y
+          CONFIG_MALI_PIXEL_GPU=y
+          CONFIG_DRM_PANEL_GOOGLE=y
+          CONFIG_GS_CHIPID=y
+          CONFIG_GOOGLE_THERMAL=y
+          CONFIG_POWER_RESET_PIXEL=y
+          CONFIG_PIXEL_DEBUG_TEST=y
+          CONFIG_VIDEO_GOOGLE=y
+          CONFIG_WNDEV=y
+          CONFIG_KSU=y
+          EOF
+          
+          if [ "${{ env.ENABLE_SUSFS }}" = "true" ]; then
+            echo "CONFIG_KSU_SUSFS=y" >> out/.config
+          fi
+          
+          make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out olddefconfig
+          echo "✅ Kernel configured"
+
+      - name: Build Kernel
+        run: |
+          cd kernel
+          export ARCH=arm64
+          export PATH="${{ env.CLANG_PATH }}:/usr/lib/ccache:$PATH"
+          export CROSS_COMPILE="${{ env.ARM64_TOOLCHAIN }}"
+          export CROSS_COMPILE_COMPAT="${{ env.ARM32_TOOLCHAIN }}"
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          export CC="ccache clang"
+          export KCFLAGS="-w"
+          
+          echo "🚀 Building Kernel with Zuma Drivers..."
+          make -j$(nproc) ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out Image.lz4 dtbs
+          echo "✅ Kernel build complete"
+
+      - name: Prepare Artifacts for Upload
+        run: |
+          mkdir -p final_artifacts
+          cp kernel/out/arch/arm64/boot/Image.lz4 final_artifacts/Image.lz4-${{ matrix.variant }}
+          find kernel/out/arch/arm64/boot/dts/google/ -name "*.dtbo" -exec cp {} final_artifacts/ \;
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Result-${{ matrix.variant }}
+          path: final_artifacts/*
