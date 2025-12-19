@@ -249,7 +249,34 @@ jobs:
           
           cd ..
           echo "✅ Google drivers integrated successfully"
+          
+      - name: Fetch and Integrate Zuma Google Modules
+        run: |
+          # 1. Prepare the directory for the modules
+          mkdir -p kernel/google-modules
+          
+          # 2. Copy the actual driver code from your synced drivers repo
+          cp -r google_drivers/google-modules/* kernel/google-modules/
+          
+          # 3. Download the specific Makefile and Kconfig from Sultan's repo
+          # This replaces any existing files with the versions from the URL
+          wget https://raw.githubusercontent.com/yapixel/android_kernel_google_zuma/refs/heads/16.0.0-sultan/google-modules/Makefile -O kernel/google-modules/Makefile
+          wget https://raw.githubusercontent.com/yapixel/android_kernel_google_zuma/refs/heads/16.0.0-sultan/google-modules/Kconfig -O kernel/google-modules/Kconfig
+          
+          cd kernel
 
+          # 4. Patch the root Makefile to include the new directory
+          if ! grep -q "obj-y += google-modules/" Makefile; then
+            echo "obj-y += google-modules/" >> Makefile
+          fi
+
+          # 5. Patch the root Kconfig to register the new config symbols
+          if ! grep -q 'source "google-modules/Kconfig"' Kconfig; then
+            sed -i '$i source "google-modules/Kconfig"' Kconfig
+          fi
+          
+          echo "✅ Zuma drivers integrated with remote config files."
+          
       - name: Clone SuSFS4KSU
         run: |
           echo "📦 Cloning SuSFS4KSU (gki-android14-6.1-dev)..."
